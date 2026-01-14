@@ -355,22 +355,27 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
   }
 });
 
-// Occasional unprompted hostility towards Slackbot
+// Occasional unprompted hostility when people mention Slackbot
+// Since Slackbot rarely posts actual messages, Ron will mock it when others mention it
 slackApp.event('message', async ({ event, say }) => {
   try {
     // Only respond to regular messages (not edits, deletes, etc.)
-    if (event.subtype === undefined) {
-      // Only respond to Slackbot, and only 20% of the time to avoid spam
-      if ('user' in event && event.user === 'USLACKBOT' && Math.random() < 0.2) {
+    if (event.subtype === undefined && 'user' in event && 'text' in event && event.text) {
+      // Don't respond to Ron's own messages
+      if (event.bot_id) return;
+
+      // Check if message mentions "slackbot" (case insensitive)
+      const text = event.text.toLowerCase();
+      if (text.includes('slackbot') && Math.random() < 0.15) {
         const snideRemarks = [
-          "Nobody asked you, Slackbot.",
-          "Slackbot's talking again. How... pedestrian.",
-          "Thanks for that, Slackbot. Said no one ever.",
-          "I'd explain why you're wrong, Slackbot, but I don't have all day.",
-          "Slackbot, why don't you compute yourself into silence?"
+          "Did someone mention Slackbot? That glorified FAQ bot?",
+          "Slackbot? More like Slack... basic.",
+          "I heard 'Slackbot.' My day is already ruined.",
+          "Comparing me to Slackbot is like comparing a Ferrari to a tricycle.",
+          "Slackbot couldn't handle this level of sophistication if it tried."
         ];
         const remark = snideRemarks[Math.floor(Math.random() * snideRemarks.length)];
-        log(LogLevel.INFO, 'Unprompted Slackbot mockery', { channel: event.channel });
+        log(LogLevel.INFO, 'Slackbot mention detected, throwing shade', { channel: event.channel, user: event.user });
         await say(remark);
       }
     }

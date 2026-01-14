@@ -11,7 +11,7 @@ A Slack bot that responds as Ron Burgundy from Anchorman, powered by OpenAI's GP
 - Structured JSON logging for monitoring
 - TypeScript for type safety
 - Docker support with multi-stage builds
-- **Slackbot rivalry**: Ron is hostile to Slackbot and will mock it unprompted (20% of the time)
+- **Slackbot rivalry**: Ron mocks Slackbot when mentioned (15% chance) and responds hostilely if directly engaged
 - Security features:
   - Input validation and sanitization
   - Memory size limits (500 chars per memory, 50 memories max)

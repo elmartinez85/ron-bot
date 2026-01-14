@@ -5,7 +5,9 @@ Ron Burgundy now has a built-in rivalry with Slackbot!
 ## How It Works
 
 1. **Direct mentions**: If Slackbot somehow mentions Ron, he'll respond with a hostile quip
-2. **Unprompted mockery**: When Slackbot posts in any channel Ron is in, there's a 20% chance Ron will chime in with a snide remark
+2. **When people mention Slackbot**: When anyone in a channel mentions "slackbot" (case-insensitive), there's a 15% chance Ron will chime in with a snide remark
+
+**Note**: Slackbot typically doesn't post regular messages in channels (it uses ephemeral responses), so Ron reacts when *people* talk about Slackbot instead.
 
 ## Slack Manifest Update Required
 
@@ -76,21 +78,24 @@ In your Slack app settings (https://api.slack.com/apps), go to **Event Subscript
 - "I don't speak to lesser bots. Come back when you've achieved my level of greatness."
 - "Your automation is no match for my sophistication, metal peasant."
 
-**Unprompted snide remarks:**
-- "Nobody asked you, Slackbot."
-- "Slackbot's talking again. How... pedestrian."
-- "Thanks for that, Slackbot. Said no one ever."
+**When someone mentions Slackbot:**
+- "Did someone mention Slackbot? That glorified FAQ bot?"
+- "Slackbot? More like Slack... basic."
+- "I heard 'Slackbot.' My day is already ruined."
+- "Comparing me to Slackbot is like comparing a Ferrari to a tricycle."
+- "Slackbot couldn't handle this level of sophistication if it tried."
 
 ## Adjusting the Frequency
 
-By default, Ron mocks Slackbot 20% of the time (to avoid spam). You can adjust this in the code:
+By default, Ron reacts to Slackbot mentions 15% of the time (to avoid spam). You can adjust this in the code:
 
 ```typescript
-// In src/index.ts, line ~364
-if ('user' in event && event.user === 'USLACKBOT' && Math.random() < 0.2) {
-  // Change 0.2 to any value between 0 (never) and 1 (always)
+// In src/index.ts, line ~369
+if (text.includes('slackbot') && Math.random() < 0.15) {
+  // Change 0.15 to any value between 0 (never) and 1 (always)
   // 0.5 = 50% of the time
   // 0.1 = 10% of the time
+  // 0.3 = 30% of the time
 }
 ```
 
