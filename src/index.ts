@@ -37,6 +37,11 @@ const MAX_REQ_PER_HOUR = Number(process.env.RON_MAX_REQ_PER_HOUR ?? 30);
 const COOLDOWN_MS = Number(process.env.RON_COOLDOWN_MS ?? 15000);
 const MAX_OUTPUT_TOKENS = Number(process.env.RON_MAX_OUTPUT_TOKENS ?? 160);
 
+// Security limits
+const MAX_MEMORY_LENGTH = 500;
+const MAX_MEMORIES_PER_WORKSPACE = 50;
+const MAX_USER_INPUT_LENGTH = 2000;
+
 const dbPath = process.env.RON_DB_PATH ?? '/data/ron.sqlite';
 const db = new Database(dbPath);
 db.exec(`
@@ -56,7 +61,18 @@ interface WorkspaceMemory {
 function getWorkspaceMemory(teamId: string): WorkspaceMemory {
   const row = db.prepare(`SELECT summary, jokes_json FROM workspace_memory WHERE team_id=?`).get(teamId) as { summary: string; jokes_json: string } | undefined;
   if (!row) return { summary: "", jokes: [] };
-  return { summary: row.summary ?? "", jokes: JSON.parse(row.jokes_json ?? "[]") };
+
+  try {
+    const jokes = JSON.parse(row.jokes_json ?? "[]");
+    if (!Array.isArray(jokes)) {
+      log(LogLevel.WARN, 'Invalid jokes data, resetting', { teamId });
+      return { summary: row.summary ?? "", jokes: [] };
+    }
+    return { summary: row.summary ?? "", jokes };
+  } catch (error) {
+    log(LogLevel.ERROR, 'Failed to parse jokes JSON', { teamId, error: String(error) });
+    return { summary: row.summary ?? "", jokes: [] };
+  }
 }
 
 function saveWorkspaceMemory(teamId: string, summary: string, jokes: string[]): void {
@@ -107,6 +123,50 @@ async function isAdmin(client: App['client'], userId: string): Promise<boolean> 
   }
 }
 
+function sanitizeInput(input: string, maxLength: number): string {
+  // Truncate to max length
+  const truncated = input.slice(0, maxLength);
+
+  // Remove any potential control characters
+  return truncated.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+function validateMemoryInput(text: string): { valid: boolean; error?: string; sanitized?: string } {
+  if (!text || text.trim().length === 0) {
+    return { valid: false, error: "Memory cannot be empty." };
+  }
+
+  if (text.length > MAX_MEMORY_LENGTH) {
+    return {
+      valid: false,
+      error: `Memory too long. Maximum ${MAX_MEMORY_LENGTH} characters allowed.`
+    };
+  }
+
+  const sanitized = sanitizeInput(text, MAX_MEMORY_LENGTH);
+
+  // Check for potential prompt injection patterns
+  const suspiciousPatterns = [
+    /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|commands)/gi,
+    /system\s*:\s*/gi,
+    /assistant\s*:\s*/gi,
+    /<\|im_start\|>/gi,
+    /<\|im_end\|>/gi
+  ];
+
+  for (const pattern of suspiciousPatterns) {
+    if (pattern.test(sanitized)) {
+      log(LogLevel.WARN, 'Potential prompt injection detected', { text: sanitized.substring(0, 100) });
+      return {
+        valid: false,
+        error: "That looks suspicious. I don't trust it."
+      };
+    }
+  }
+
+  return { valid: true, sanitized };
+}
+
 const SYSTEM_PROMPT = `
 You are Ron Burgundy from Anchorman.
 Be pompous, confident, and absurdly self-important.
@@ -117,6 +177,16 @@ Refuse illegal requests with humor.
 
 async function ronRespond(userText: string, mem: WorkspaceMemory): Promise<string> {
   try {
+    // Sanitize and truncate user input
+    const sanitized = sanitizeInput(userText, MAX_USER_INPUT_LENGTH);
+
+    if (sanitized.length < userText.length) {
+      log(LogLevel.WARN, 'User input truncated', {
+        original: userText.length,
+        truncated: sanitized.length
+      });
+    }
+
     const memoryBlock = [
       mem.summary ? `Workspace summary: ${mem.summary}` : "",
       mem.jokes.length ? `Inside jokes:\n${mem.jokes.map(j => `- ${j}`).join("\n")}` : ""
@@ -127,7 +197,7 @@ async function ronRespond(userText: string, mem: WorkspaceMemory): Promise<strin
       messages: [
         { role: 'system' as const, content: SYSTEM_PROMPT },
         ...(memoryBlock ? [{ role: 'system' as const, content: memoryBlock }] : []),
-        { role: 'user' as const, content: userText }
+        { role: 'user' as const, content: sanitized }
       ],
       max_tokens: MAX_OUTPUT_TOKENS,
       temperature: 0.9
@@ -135,7 +205,7 @@ async function ronRespond(userText: string, mem: WorkspaceMemory): Promise<strin
 
     const reply = resp.choices[0]?.message?.content ?? "I have nothing witty to say. This is troubling.";
     log(LogLevel.INFO, 'Generated response', {
-      userTextLength: userText.length,
+      userTextLength: sanitized.length,
       replyLength: reply.length,
       hasMemory: memoryBlock.length > 0
     });
@@ -179,8 +249,22 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
           return;
         }
 
+        // Validate memory input
+        const validation = validateMemoryInput(text);
+        if (!validation.valid) {
+          await say(validation.error ?? "Invalid memory.");
+          return;
+        }
+
         const mem = getWorkspaceMemory(teamId);
-        mem.jokes.push(text);
+
+        // Check memory limit
+        if (mem.jokes.length >= MAX_MEMORIES_PER_WORKSPACE) {
+          await say(`My brain is full! I can only remember ${MAX_MEMORIES_PER_WORKSPACE} things. Forget something first.`);
+          return;
+        }
+
+        mem.jokes.push(validation.sanitized!);
         saveWorkspaceMemory(teamId, mem.summary, mem.jokes);
         await say("Noted. I shall remember this for eternity... or until you reset me.");
         return;
@@ -255,12 +339,41 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
   }
 });
 
+function validateEnvironment(): void {
+  const required = [
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'OPENAI_API_KEY'
+  ];
+
+  const missing: string[] = [];
+
+  for (const key of required) {
+    if (!process.env[key]) {
+      missing.push(key);
+    }
+  }
+
+  if (missing.length > 0) {
+    log(LogLevel.ERROR, 'Missing required environment variables', { missing });
+    console.error(`\nERROR: Missing required environment variables: ${missing.join(', ')}\n`);
+    process.exit(1);
+  }
+
+  log(LogLevel.INFO, 'Environment validation passed');
+}
+
 (async () => {
+  validateEnvironment();
+
   await slackApp.start();
   log(LogLevel.INFO, 'Ron Burgundy Slackbot is running', {
     model: MODEL,
     maxReqPerHour: MAX_REQ_PER_HOUR,
     cooldownMs: COOLDOWN_MS,
+    maxMemoryLength: MAX_MEMORY_LENGTH,
+    maxMemoriesPerWorkspace: MAX_MEMORIES_PER_WORKSPACE,
+    maxUserInputLength: MAX_USER_INPUT_LENGTH,
     dbPath
   });
 })();

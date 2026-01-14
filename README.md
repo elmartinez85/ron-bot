@@ -11,6 +11,12 @@ A Slack bot that responds as Ron Burgundy from Anchorman, powered by OpenAI's GP
 - Structured JSON logging for monitoring
 - TypeScript for type safety
 - Docker support with multi-stage builds
+- Security features:
+  - Input validation and sanitization
+  - Memory size limits (500 chars per memory, 50 memories max)
+  - User input truncation (2000 chars max)
+  - Prompt injection detection
+  - Environment variable validation on startup
 
 ## Setup
 
