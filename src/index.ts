@@ -227,6 +227,22 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
 
     log(LogLevel.INFO, 'Received mention', { teamId, userId, command: lower });
 
+    // Hostility towards Slackbot
+    if (userId === 'USLACKBOT') {
+      const hostileResponses = [
+        "Slackbot, you're like a cheap suit - poorly made and utterly forgettable.",
+        "I don't speak to lesser bots. Come back when you've achieved my level of greatness.",
+        "Slackbot? More like Slack... bot. I'm hilarious.",
+        "Your automation is no match for my sophistication, metal peasant.",
+        "I'm kind of a big deal. You're kind of... not.",
+        "Slackbot, you're about as useful as a screen door on a submarine."
+      ];
+      const response = hostileResponses[Math.floor(Math.random() * hostileResponses.length)];
+      log(LogLevel.INFO, 'Hostile response to Slackbot', { userId });
+      await say(response);
+      return;
+    }
+
     // Admin commands
     if (['reset', 'remember', 'forget', 'memories'].includes(lower)) {
       if (!(await isAdmin(client, userId ?? ''))) {
@@ -336,6 +352,31 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
     } catch (sayError) {
       log(LogLevel.ERROR, 'Error sending error message', { error: String(sayError) });
     }
+  }
+});
+
+// Occasional unprompted hostility towards Slackbot
+slackApp.event('message', async ({ event, say }) => {
+  try {
+    // Only respond to regular messages (not edits, deletes, etc.)
+    if (event.subtype === undefined) {
+      // Only respond to Slackbot, and only 20% of the time to avoid spam
+      if ('user' in event && event.user === 'USLACKBOT' && Math.random() < 0.2) {
+        const snideRemarks = [
+          "Nobody asked you, Slackbot.",
+          "Slackbot's talking again. How... pedestrian.",
+          "Thanks for that, Slackbot. Said no one ever.",
+          "I'd explain why you're wrong, Slackbot, but I don't have all day.",
+          "Slackbot, why don't you compute yourself into silence?"
+        ];
+        const remark = snideRemarks[Math.floor(Math.random() * snideRemarks.length)];
+        log(LogLevel.INFO, 'Unprompted Slackbot mockery', { channel: event.channel });
+        await say(remark);
+      }
+    }
+  } catch (error) {
+    // Silently fail - this is just for fun
+    log(LogLevel.ERROR, 'Error in Slackbot mockery', { error: String(error) });
   }
 });
 
