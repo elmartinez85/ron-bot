@@ -64,17 +64,26 @@ npm run dev
 
 ### Docker Deployment
 
-Build the Docker image:
+**Initial deployment:**
 ```bash
 docker-compose build
-```
-
-Run with Docker Compose:
-```bash
 docker-compose up -d
 ```
 
-The bot will store its SQLite database in the `./data` directory.
+**Updating to latest version:**
+```bash
+# Stop the running container
+docker-compose down
+
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker-compose build
+docker-compose up -d
+```
+
+The bot will store its SQLite database in the `./data` directory (persists across updates).
 
 ## Configuration
 

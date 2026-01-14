@@ -62,6 +62,7 @@ In your Slack app settings (https://api.slack.com/apps), go to **Event Subscript
 
 ### Steps to Update
 
+**1. Update Slack app configuration:**
 1. Go to https://api.slack.com/apps
 2. Select your Ron Burgundy app
 3. Go to **OAuth & Permissions**
@@ -70,6 +71,19 @@ In your Slack app settings (https://api.slack.com/apps), go to **Event Subscript
 6. Under **Subscribe to bot events**, add `message.channels`
 7. Save changes
 8. **Reinstall the app** to your workspace (you'll be prompted)
+
+**2. Deploy updated code to your server:**
+```bash
+# Stop the running container
+docker-compose down
+
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker-compose build
+docker-compose up -d
+```
 
 ## Example Responses
 
