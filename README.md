@@ -6,8 +6,9 @@ A Slack bot that responds as Ron Burgundy from Anchorman, powered by OpenAI's GP
 
 - Responds to mentions with Ron Burgundy's pompous, confident personality
 - Workspace memory system for context and inside jokes
+- Admin commands to manage memories (add, remove, view, reset)
 - Rate limiting (per-hour and cooldown)
-- Admin-only memory reset command
+- Structured JSON logging for monitoring
 - TypeScript for type safety
 - Docker support with multi-stage builds
 
@@ -96,7 +97,24 @@ Ron will respond in character with his signature pompous style.
 
 ### Admin Commands
 
-Workspace admins can reset Ron's memory:
+Workspace admins have access to memory management commands:
+
+**View all memories:**
+```
+@Ron memories
+```
+
+**Add a new memory/inside joke:**
+```
+@Ron remember We always call the break room "the think tank"
+```
+
+**Remove a memory by number:**
+```
+@Ron forget 2
+```
+
+**Reset all memories:**
 ```
 @Ron reset
 ```
