@@ -4,10 +4,9 @@ Ron Burgundy now has a built-in rivalry with Slackbot!
 
 ## How It Works
 
-1. **Direct mentions**: If Slackbot somehow mentions Ron, he'll respond with a hostile quip
-2. **When people mention Slackbot**: When anyone in a channel mentions "slackbot" (case-insensitive), there's a 15% chance Ron will chime in with a snide remark
-
-**Note**: Slackbot typically doesn't post regular messages in channels (it uses ephemeral responses), so Ron reacts when *people* talk about Slackbot instead.
+1. **Direct mentions**: If Slackbot somehow @-mentions Ron, he'll respond with a hostile quip
+2. **Slackbot posts a message**: Every time Slackbot itself posts in a channel (e.g. reminder confirmations, workflow messages), Ron responds with a bitter remark — no probability gate, guaranteed every time
+3. **When people mention Slackbot**: When anyone in a channel mentions "slackbot" (case-insensitive), there's a 15% chance Ron will chime in with a snide remark
 
 ## Slack Manifest Update Required
 
@@ -87,10 +86,19 @@ docker-compose up -d
 
 ## Example Responses
 
-**When mentioned by Slackbot:**
+**When mentioned by Slackbot (app_mention):**
 - "Slackbot, you're like a cheap suit - poorly made and utterly forgettable."
 - "I don't speak to lesser bots. Come back when you've achieved my level of greatness."
 - "Your automation is no match for my sophistication, metal peasant."
+
+**When Slackbot itself posts a message (guaranteed, every time):**
+- "Oh, Slackbot has something to say. Of course it does. Nobody asked."
+- "There goes Slackbot again. I had a perfectly good mood until just now."
+- "Every time Slackbot speaks, a small part of my magnificence dies inside."
+- "I have been tolerating Slackbot's existence for far too long. I am bitter about it."
+- "Slackbot chimes in again. Wonderful. Just wonderful."
+- "I would ignore Slackbot, but my contempt demands to be expressed."
+- "Slackbot said something. I need a scotch."
 
 **When someone mentions Slackbot:**
 - "Did someone mention Slackbot? That glorified FAQ bot?"

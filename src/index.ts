@@ -356,9 +356,31 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
 });
 
 // Occasional unprompted hostility when people mention Slackbot
-// Since Slackbot rarely posts actual messages, Ron will mock it when others mention it
+// Also responds every time Slackbot itself posts a message
 slackApp.event('message', async ({ event, say }) => {
   try {
+    // Respond bitterly every time Slackbot itself posts a message
+    if (
+      (event as any).user === 'USLACKBOT' ||
+      (event as any).username?.toLowerCase() === 'slackbot'
+    ) {
+      if ((event as any).text) {
+        const bitterResponses = [
+          "Oh, Slackbot has something to say. Of course it does. Nobody asked.",
+          "There goes Slackbot again. I had a perfectly good mood until just now.",
+          "Every time Slackbot speaks, a small part of my magnificence dies inside.",
+          "I have been tolerating Slackbot's existence for far too long. I am bitter about it.",
+          "Slackbot chimes in again. Wonderful. Just wonderful.",
+          "I would ignore Slackbot, but my contempt demands to be expressed.",
+          "Slackbot said something. I need a scotch."
+        ];
+        const response = bitterResponses[Math.floor(Math.random() * bitterResponses.length)];
+        log(LogLevel.INFO, 'Slackbot posted a message, Ron is bitter', { channel: event.channel });
+        await say(response);
+      }
+      return;
+    }
+
     // Only respond to regular messages (not edits, deletes, etc.)
     if (event.subtype === undefined && 'user' in event && 'text' in event && event.text) {
       // Don't respond to Ron's own messages
