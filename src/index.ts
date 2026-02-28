@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { App, SayFn } from '@slack/bolt';
 import OpenAI from 'openai';
 import Database from 'better-sqlite3';
+import cron from 'node-cron';
 
 // Structured logging
 enum LogLevel {
@@ -36,6 +37,8 @@ const MODEL = process.env.RON_MODEL ?? 'gpt-4o-mini';
 const MAX_REQ_PER_HOUR = Number(process.env.RON_MAX_REQ_PER_HOUR ?? 30);
 const COOLDOWN_MS = Number(process.env.RON_COOLDOWN_MS ?? 15000);
 const MAX_OUTPUT_TOKENS = Number(process.env.RON_MAX_OUTPUT_TOKENS ?? 160);
+const AFFIRMATION_CHANNEL = process.env.RON_AFFIRMATION_CHANNEL ?? '';
+const AFFIRMATION_CRON    = process.env.RON_AFFIRMATION_CRON ?? '0 9 * * *';
 
 // Security limits
 const MAX_MEMORY_LENGTH = 500;
@@ -213,6 +216,34 @@ async function ronRespond(userText: string, mem: WorkspaceMemory): Promise<strin
   } catch (error) {
     log(LogLevel.ERROR, 'Error generating Ron response', { error: String(error) });
     return "My teleprompter appears to be malfunctioning. Please try again later.";
+  }
+}
+
+async function ronAffirmation(mem: WorkspaceMemory): Promise<string> {
+  try {
+    const memoryBlock = [
+      mem.summary ? `Workspace summary: ${mem.summary}` : "",
+      mem.jokes.length ? `Inside jokes:\n${mem.jokes.map(j => `- ${j}`).join("\n")}` : ""
+    ].filter(Boolean).join("\n\n");
+
+    const prompt = "Deliver a morning affirmation as Ron Burgundy. Be pompous, self-congratulatory, and treat today as though the world is lucky to have you in it. Make it feel like a genuine broadcast moment.";
+
+    const resp = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system' as const, content: SYSTEM_PROMPT },
+        ...(memoryBlock ? [{ role: 'system' as const, content: memoryBlock }] : []),
+        { role: 'user' as const, content: prompt }
+      ],
+      max_tokens: 200,
+      temperature: 0.9
+    });
+
+    return resp.choices[0]?.message?.content
+      ?? "Good morning. Ron Burgundy is here. That is all you need to know.";
+  } catch (error) {
+    log(LogLevel.ERROR, 'Error generating affirmation', { error: String(error) });
+    return "Good morning. Ron Burgundy is here. That is all you need to know.";
   }
 }
 
@@ -444,4 +475,31 @@ function validateEnvironment(): void {
     maxUserInputLength: MAX_USER_INPUT_LENGTH,
     dbPath
   });
+
+  const authResult = await slackApp.client.auth.test();
+  const teamId = authResult.team_id as string;
+
+  if (AFFIRMATION_CHANNEL) {
+    if (!cron.validate(AFFIRMATION_CRON)) {
+      log(LogLevel.ERROR, 'Invalid RON_AFFIRMATION_CRON expression', { cron: AFFIRMATION_CRON });
+    } else {
+      cron.schedule(AFFIRMATION_CRON, async () => {
+        try {
+          const mem = getWorkspaceMemory(teamId);
+          const affirmation = await ronAffirmation(mem);
+          await slackApp.client.chat.postMessage({
+            channel: AFFIRMATION_CHANNEL,
+            text: affirmation
+          });
+          log(LogLevel.INFO, 'Daily affirmation posted', { channel: AFFIRMATION_CHANNEL });
+        } catch (error) {
+          log(LogLevel.ERROR, 'Failed to post daily affirmation', { error: String(error) });
+        }
+      });
+      log(LogLevel.INFO, 'Daily affirmation scheduler started', {
+        channel: AFFIRMATION_CHANNEL,
+        cron: AFFIRMATION_CRON
+      });
+    }
+  }
 })();
