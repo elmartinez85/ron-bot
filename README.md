@@ -1,6 +1,6 @@
 # Ron Burgundy Slackbot
 
-A Slack bot that responds as Ron Burgundy from Anchorman, powered by OpenAI's GPT models.
+A Slack bot that responds as Ron Burgundy from Anchorman, powered by Anthropic's Claude models.
 
 ## Features
 
@@ -25,7 +25,7 @@ A Slack bot that responds as Ron Burgundy from Anchorman, powered by OpenAI's GP
 
 - Node.js 20+
 - Slack workspace with bot permissions
-- OpenAI API key
+- Anthropic API key
 
 ### Installation
 
@@ -43,7 +43,7 @@ A Slack bot that responds as Ron Burgundy from Anchorman, powered by OpenAI's GP
 4. Set your environment variables in `.env`:
    - `SLACK_BOT_TOKEN`: Your Slack bot token (xoxb-...)
    - `SLACK_APP_TOKEN`: Your Slack app token (xapp-...)
-   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `ANTHROPIC_API_KEY`: Your Anthropic API key
 
 ### Development
 
@@ -93,9 +93,9 @@ All configuration is done via environment variables:
 |----------|---------|-------------|
 | `SLACK_BOT_TOKEN` | - | Slack bot token (required) |
 | `SLACK_APP_TOKEN` | - | Slack app token for Socket Mode (required) |
-| `OPENAI_API_KEY` | - | OpenAI API key (required) |
+| `ANTHROPIC_API_KEY` | - | Anthropic API key (required) |
 | `RON_DB_PATH` | `/data/ron.sqlite` | Path to SQLite database |
-| `RON_MODEL` | `gpt-4o-mini` | OpenAI model to use |
+| `RON_MODEL` | `claude-haiku-4-5` | Claude model to use |
 | `RON_MAX_REQ_PER_HOUR` | `30` | Maximum requests per hour |
 | `RON_COOLDOWN_MS` | `15000` | Cooldown between requests (ms) |
 | `RON_MAX_OUTPUT_TOKENS` | `160` | Maximum tokens in responses |
@@ -139,7 +139,7 @@ Workspace admins have access to memory management commands:
 
 - **TypeScript**: Full type safety with strict mode
 - **Slack Bolt**: Event-driven Slack integration with Socket Mode
-- **OpenAI API**: GPT-powered responses with character prompts
+- **Anthropic API**: Claude-powered responses with character prompts
 - **SQLite**: Persistent workspace memory storage
 - **Docker**: Multi-stage builds for optimized production images
 

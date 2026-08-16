@@ -2,28 +2,16 @@
 // See README/instructions from ChatGPT conversation
 
 import 'dotenv/config';
-import { App, SayFn } from '@slack/bolt';
-import OpenAI from 'openai';
+import { App } from '@slack/bolt';
+import Anthropic from '@anthropic-ai/sdk';
 import Database from 'better-sqlite3';
 import cron from 'node-cron';
-
-// Structured logging
-enum LogLevel {
-  INFO = 'INFO',
-  WARN = 'WARN',
-  ERROR = 'ERROR'
-}
-
-function log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
-  const timestamp = new Date().toISOString();
-  const logEntry = {
-    timestamp,
-    level,
-    message,
-    ...meta
-  };
-  console.log(JSON.stringify(logEntry));
-}
+import { LogLevel, log } from './logger.js';
+import { createHourlyLimiter, createCooldownLimiter } from './rateLimit.js';
+import { createMemoryStore } from './memory.js';
+import { isAdmin } from './admin.js';
+import { validateMemoryInput } from './validation.js';
+import { createRonClient } from './claude.js';
 
 const slackApp = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -31,9 +19,9 @@ const slackApp = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 });
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MODEL = process.env.RON_MODEL ?? 'gpt-4o-mini';
+const MODEL = process.env.RON_MODEL ?? 'claude-haiku-4-5';
 const MAX_REQ_PER_HOUR = Number(process.env.RON_MAX_REQ_PER_HOUR ?? 30);
 const COOLDOWN_MS = Number(process.env.RON_COOLDOWN_MS ?? 15000);
 const MAX_OUTPUT_TOKENS = Number(process.env.RON_MAX_OUTPUT_TOKENS ?? 160);
@@ -47,205 +35,16 @@ const MAX_USER_INPUT_LENGTH = 2000;
 
 const dbPath = process.env.RON_DB_PATH ?? '/data/ron.sqlite';
 const db = new Database(dbPath);
-db.exec(`
-CREATE TABLE IF NOT EXISTS workspace_memory (
-  team_id TEXT PRIMARY KEY,
-  summary TEXT NOT NULL,
-  jokes_json TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-`);
+const { getWorkspaceMemory, saveWorkspaceMemory } = createMemoryStore(db);
 
-interface WorkspaceMemory {
-  summary: string;
-  jokes: string[];
-}
+const allowHourly = createHourlyLimiter(MAX_REQ_PER_HOUR);
+const allowCooldown = createCooldownLimiter(COOLDOWN_MS);
 
-function getWorkspaceMemory(teamId: string): WorkspaceMemory {
-  const row = db.prepare(`SELECT summary, jokes_json FROM workspace_memory WHERE team_id=?`).get(teamId) as { summary: string; jokes_json: string } | undefined;
-  if (!row) return { summary: "", jokes: [] };
-
-  try {
-    const jokes = JSON.parse(row.jokes_json ?? "[]");
-    if (!Array.isArray(jokes)) {
-      log(LogLevel.WARN, 'Invalid jokes data, resetting', { teamId });
-      return { summary: row.summary ?? "", jokes: [] };
-    }
-    return { summary: row.summary ?? "", jokes };
-  } catch (error) {
-    log(LogLevel.ERROR, 'Failed to parse jokes JSON', { teamId, error: String(error) });
-    return { summary: row.summary ?? "", jokes: [] };
-  }
-}
-
-function saveWorkspaceMemory(teamId: string, summary: string, jokes: string[]): void {
-  db.prepare(`
-    INSERT INTO workspace_memory(team_id, summary, jokes_json, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(team_id) DO UPDATE SET
-      summary=excluded.summary,
-      jokes_json=excluded.jokes_json,
-      updated_at=excluded.updated_at
-  `).run(teamId, summary, JSON.stringify(jokes), Date.now());
-
-  log(LogLevel.INFO, 'Workspace memory updated', { teamId, summary: summary.substring(0, 50), jokesCount: jokes.length });
-}
-
-
-let windowStart = Date.now();
-let reqCount = 0;
-
-function allowHourly(): boolean {
-  const now = Date.now();
-  if (now - windowStart >= 3600000) {
-    windowStart = now;
-    reqCount = 0;
-  }
-  if (reqCount >= MAX_REQ_PER_HOUR) return false;
-  reqCount++;
-  return true;
-}
-
-const lastHit = new Map<string, number>();
-function allowCooldown(teamId: string): boolean {
-  const now = Date.now();
-  const last = lastHit.get(teamId) ?? 0;
-  if (now - last < COOLDOWN_MS) return false;
-  lastHit.set(teamId, now);
-  return true;
-}
-
-async function isAdmin(client: App['client'], userId: string): Promise<boolean> {
-  try {
-    const res = await client.users.info({ user: userId });
-    const u = res.user;
-    return Boolean(u?.is_admin || u?.is_owner || u?.is_primary_owner);
-  } catch (error) {
-    log(LogLevel.ERROR, 'Error checking admin status', { userId, error: String(error) });
-    return false;
-  }
-}
-
-function sanitizeInput(input: string, maxLength: number): string {
-  // Truncate to max length
-  const truncated = input.slice(0, maxLength);
-
-  // Remove any potential control characters
-  return truncated.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-}
-
-function validateMemoryInput(text: string): { valid: boolean; error?: string; sanitized?: string } {
-  if (!text || text.trim().length === 0) {
-    return { valid: false, error: "Memory cannot be empty." };
-  }
-
-  if (text.length > MAX_MEMORY_LENGTH) {
-    return {
-      valid: false,
-      error: `Memory too long. Maximum ${MAX_MEMORY_LENGTH} characters allowed.`
-    };
-  }
-
-  const sanitized = sanitizeInput(text, MAX_MEMORY_LENGTH);
-
-  // Check for potential prompt injection patterns
-  const suspiciousPatterns = [
-    /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|commands)/gi,
-    /system\s*:\s*/gi,
-    /assistant\s*:\s*/gi,
-    /<\|im_start\|>/gi,
-    /<\|im_end\|>/gi
-  ];
-
-  for (const pattern of suspiciousPatterns) {
-    if (pattern.test(sanitized)) {
-      log(LogLevel.WARN, 'Potential prompt injection detected', { text: sanitized.substring(0, 100) });
-      return {
-        valid: false,
-        error: "That looks suspicious. I don't trust it."
-      };
-    }
-  }
-
-  return { valid: true, sanitized };
-}
-
-const SYSTEM_PROMPT = `
-You are Ron Burgundy from Anchorman.
-Be pompous, confident, and absurdly self-important.
-Keep replies under 80 words.
-No hateful, sexual, or dangerous content.
-Refuse illegal requests with humor.
-`;
-
-async function ronRespond(userText: string, mem: WorkspaceMemory): Promise<string> {
-  try {
-    // Sanitize and truncate user input
-    const sanitized = sanitizeInput(userText, MAX_USER_INPUT_LENGTH);
-
-    if (sanitized.length < userText.length) {
-      log(LogLevel.WARN, 'User input truncated', {
-        original: userText.length,
-        truncated: sanitized.length
-      });
-    }
-
-    const memoryBlock = [
-      mem.summary ? `Workspace summary: ${mem.summary}` : "",
-      mem.jokes.length ? `Inside jokes:\n${mem.jokes.map(j => `- ${j}`).join("\n")}` : ""
-    ].filter(Boolean).join("\n\n");
-
-    const resp = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system' as const, content: SYSTEM_PROMPT },
-        ...(memoryBlock ? [{ role: 'system' as const, content: memoryBlock }] : []),
-        { role: 'user' as const, content: sanitized }
-      ],
-      max_tokens: MAX_OUTPUT_TOKENS,
-      temperature: 0.9
-    });
-
-    const reply = resp.choices[0]?.message?.content ?? "I have nothing witty to say. This is troubling.";
-    log(LogLevel.INFO, 'Generated response', {
-      userTextLength: sanitized.length,
-      replyLength: reply.length,
-      hasMemory: memoryBlock.length > 0
-    });
-    return reply;
-  } catch (error) {
-    log(LogLevel.ERROR, 'Error generating Ron response', { error: String(error) });
-    return "My teleprompter appears to be malfunctioning. Please try again later.";
-  }
-}
-
-async function ronAffirmation(mem: WorkspaceMemory): Promise<string> {
-  try {
-    const memoryBlock = [
-      mem.summary ? `Workspace summary: ${mem.summary}` : "",
-      mem.jokes.length ? `Inside jokes:\n${mem.jokes.map(j => `- ${j}`).join("\n")}` : ""
-    ].filter(Boolean).join("\n\n");
-
-    const prompt = "Deliver a morning affirmation as Ron Burgundy. Be pompous, self-congratulatory, and treat today as though the world is lucky to have you in it. Make it feel like a genuine broadcast moment.";
-
-    const resp = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system' as const, content: SYSTEM_PROMPT },
-        ...(memoryBlock ? [{ role: 'system' as const, content: memoryBlock }] : []),
-        { role: 'user' as const, content: prompt }
-      ],
-      max_tokens: 200,
-      temperature: 0.9
-    });
-
-    return resp.choices[0]?.message?.content
-      ?? "Good morning. Ron Burgundy is here. That is all you need to know.";
-  } catch (error) {
-    log(LogLevel.ERROR, 'Error generating affirmation', { error: String(error) });
-    return "Good morning. Ron Burgundy is here. That is all you need to know.";
-  }
-}
+const ron = createRonClient(anthropic, {
+  model: MODEL,
+  maxOutputTokens: MAX_OUTPUT_TOKENS,
+  maxUserInputLength: MAX_USER_INPUT_LENGTH
+});
 
 slackApp.event('app_mention', async ({ event, client, say }) => {
   try {
@@ -297,7 +96,7 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
         }
 
         // Validate memory input
-        const validation = validateMemoryInput(text);
+        const validation = validateMemoryInput(text, MAX_MEMORY_LENGTH);
         if (!validation.valid) {
           await say(validation.error ?? "Invalid memory.");
           return;
@@ -367,14 +166,14 @@ slackApp.event('app_mention', async ({ event, client, say }) => {
       return;
     }
     if (!allowHourly()) {
-      log(LogLevel.WARN, 'Hourly rate limit hit', { teamId, count: reqCount });
+      log(LogLevel.WARN, 'Hourly rate limit hit', { teamId });
       await say("I've reached my quota for the hour. Even legends need rest.");
       return;
     }
 
     // Normal response
     const mem = getWorkspaceMemory(teamId);
-    const reply = await ronRespond(cleaned, mem);
+    const reply = await ron.ronRespond(cleaned, mem);
     await say(reply);
   } catch (error) {
     log(LogLevel.ERROR, 'Error handling app_mention', { error: String(error) });
@@ -442,7 +241,7 @@ function validateEnvironment(): void {
   const required = [
     'SLACK_BOT_TOKEN',
     'SLACK_APP_TOKEN',
-    'OPENAI_API_KEY'
+    'ANTHROPIC_API_KEY'
   ];
 
   const missing: string[] = [];
@@ -486,7 +285,7 @@ function validateEnvironment(): void {
       cron.schedule(AFFIRMATION_CRON, async () => {
         try {
           const mem = getWorkspaceMemory(teamId);
-          const affirmation = await ronAffirmation(mem);
+          const affirmation = await ron.ronAffirmation(mem);
           await slackApp.client.chat.postMessage({
             channel: AFFIRMATION_CHANNEL,
             text: affirmation
